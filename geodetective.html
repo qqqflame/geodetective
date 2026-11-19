@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GeoDetective</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
+<script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+<style>
+  /* ---------- Тема: тёмная по умолчанию ---------- */
+  :root{
+    --bg:#0b101c;
+    --surface:#151c2c; --surface-2:#1c2537;
+    --ink:#e9eef7; --muted:#94a2b9; --line:#28334a;
+    --accent:#5b8cff; --accent-strong:#3f74f0; --accent-soft:#182848;
+    --good:#34d399; --bad:#ff7070; --amber:#f5b74e;
+    --pill:rgba(19,26,41,.88);
+    --btn-disabled:#33415e;
+    --map-sea:#0e1626; --map-land:#26344b; --map-stroke:#3e5478;
+    --map-grat:#182338; --map-label:#4e627f; --trace:#dfe6f2;
+    --radius:14px;
+    --shadow:0 2px 10px rgba(0,0,0,.45),0 10px 34px rgba(0,0,0,.5);
+  }
+  body.light{
+    --bg:#dfe5ee;
+    --surface:#ffffff; --surface-2:#f6f7f9;
+    --ink:#1b2434; --muted:#66707f; --line:#e6e9ee;
+    --accent:#2563eb; --accent-strong:#1d4fd7; --accent-soft:#eaf0fe;
+    --good:#16a34a; --bad:#dc2626; --amber:#b45309;
+    --pill:rgba(255,255,255,.94);
+    --btn-disabled:#b9c6e8;
+    --map-sea:#eef4fb; --map-land:#cfdcec; --map-stroke:#9fb4cd;
+    --map-grat:#dde7f2; --map-label:#8aa0bb; --trace:#1b2434;
+    --shadow:0 2px 8px rgba(16,24,40,.12),0 8px 28px rgba(16,24,40,.14);
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:15px; line-height:1.5;
+  }
+  button{font-family:inherit}
+
+  /* ---------- Панорама: весь экран ---------- */
+  #pano{position:fixed; inset:0; z-index:1}
+  #panoLoad{
+    position:fixed; inset:0; z-index:3; display:flex; flex-direction:column; gap:10px;
+    align-items:center; justify-content:center; background:#0f1420; color:#9fb0c8;
+    font-size:14px; transition:opacity .4s;
+  }
+  #panoLoad .spin{
+    width:34px; height:34px; border-radius:50%;
+    border:3px solid #2a3550; border-top-color:var(--accent);
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #panoFallback{
+    position:fixed; inset:0; z-index:2; display:none; flex-direction:column;
+    align-items:center; justify-content:center; gap:16px; text-align:center;
+    background:linear-gradient(165deg,#141d31,#22304d 55%,#3a4f74); color:#e8eef7; padding:24px;
+  }
+  #panoFallback .note{max-width:440px; font-size:14px; color:#c6d2e4}
+  #panoFallback .why{font-size:12px; color:#93a3bd}
+  .fb-anchors{display:flex; gap:10px; flex-wrap:wrap; justify-content:center}
+  .fb-anchor{
+    border:none; background:rgba(255,255,255,.92); color:#1b2434; border-radius:99px;
+    padding:9px 16px; font-size:14px; cursor:pointer; box-shadow:var(--shadow);
+  }
+  .fb-anchor.done{opacity:.45; cursor:default}
+
+  /* ---------- Стрелки перехода между точками ---------- */
+  .gd-move{width:170px; height:88px; cursor:pointer; text-align:center}
+  .gd-move .arr{
+    width:48px; height:48px; margin:0 auto; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(10,14,24,.5); border:2px solid rgba(255,255,255,.9);
+    backdrop-filter:blur(3px); color:#fff;
+    transition:background .2s, transform .2s, border-color .2s;
+  }
+  .gd-move .arr svg{animation:bob 2.6s ease-in-out infinite}
+  .gd-move:hover .arr{background:var(--accent); border-color:#fff; transform:scale(1.1)}
+  .gd-move .lbl{
+    display:inline-block; margin-top:7px; font-size:12px; font-weight:600; color:#fff;
+    background:rgba(10,14,24,.55); backdrop-filter:blur(3px);
+    border-radius:99px; padding:3px 11px; white-space:nowrap; transition:background .2s;
+  }
+  .gd-move:hover .lbl{background:rgba(10,14,24,.8)}
+  @keyframes bob{0%,100%{transform:translateY(2px)}50%{transform:translateY(-4px)}}
+
+  /* ---------- Вводная карточка дела ---------- */
+  #introCard{
+    position:fixed; left:50%; top:15%; z-index:27;
+    width:min(540px,92vw); padding:20px 22px 18px;
+    background:var(--surface); border:1px solid var(--line); border-radius:18px;
+    box-shadow:0 24px 70px rgba(0,0,0,.5);
+    opacity:0; visibility:hidden;
+    transform:translate(-50%,-18px) scale(.95);
+    transition:opacity .5s cubic-bezier(.2,.8,.3,1), transform .5s cubic-bezier(.2,.8,.3,1), visibility 0s linear .5s;
+  }
+  #introCard.show{
+    opacity:1; visibility:visible; transform:translate(-50%,0) scale(1);
+    transition:opacity .5s cubic-bezier(.2,.8,.3,1), transform .5s cubic-bezier(.2,.8,.3,1);
+  }
+  #introCard::before{
+    content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
+    background:linear-gradient(120deg,var(--accent),transparent 35%,transparent 65%,var(--accent));
+    -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);
+    -webkit-mask-composite:xor; mask-composite:exclude; pointer-events:none;
+  }
+  #introCard .kicker{font-size:12px; font-weight:600; letter-spacing:1.5px; color:var(--accent); text-transform:uppercase}
+  #introCard .ittl{font-size:18px; font-weight:700; margin:6px 0 8px}
+  #introCard .itext{font-size:14.5px; color:var(--ink); min-height:66px}
+  .caret{
+    display:inline-block; width:2px; height:1em; background:var(--accent);
+    margin-left:2px; vertical-align:-2px; animation:blink 1s steps(1) infinite;
+  }
+  @keyframes blink{50%{opacity:0}}
+  #introBtn{margin-top:14px; width:100%}
+
+  /* ---------- Всплывающие улики ---------- */
+  #toasts{
+    position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:26;
+    display:flex; flex-direction:column; gap:10px; align-items:stretch;
+    width:min(440px,94vw); pointer-events:none;
+  }
+  .toast{
+    pointer-events:auto; display:flex; gap:11px; align-items:flex-start;
+    background:var(--pill); backdrop-filter:blur(10px);
+    border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius:14px; box-shadow:var(--shadow); padding:12px 14px;
+    opacity:0; transform:translateY(-14px) scale(.97);
+    transition:opacity .45s cubic-bezier(.2,.8,.3,1), transform .45s cubic-bezier(.2,.8,.3,1);
+  }
+  .toast.in{opacity:1; transform:none}
+  .toast.out{opacity:0; transform:translateY(-8px) scale(.98)}
+  .toast .ticon{font-size:22px; line-height:1.3}
+  .toast .tbody{flex:1}
+  .toast .ttl{font-size:11.5px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--accent)}
+  .toast .txt{font-size:13.5px; color:var(--ink); margin-top:2px}
+  .toast .tx{border:none; background:none; color:var(--muted); cursor:pointer; font-size:14px; padding:2px; line-height:1}
+
+  @media (prefers-reduced-motion:reduce){
+    #panoLoad .spin,.gd-move .arr svg,.caret{animation:none}
+    #introCard,.toast{transition:opacity .2s}
+  }
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed; z-index:10}
+  .hud-top{
+    top:14px; left:14px; right:14px; display:flex; gap:8px; align-items:flex-start;
+    pointer-events:none;
+  }
+  .pill{
+    background:var(--pill); backdrop-filter:blur(6px);
+    border-radius:99px; box-shadow:var(--shadow);
+    padding:7px 15px; font-size:13.5px; color:var(--muted);
+    white-space:nowrap; pointer-events:auto;
+  }
+  .pill b{color:var(--ink); font-variant-numeric:tabular-nums}
+  .pill.brand{font-weight:700; font-size:15px; color:var(--ink)}
+  .pill.brand span{color:var(--accent)}
+  .hud-top .right{margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end}
+  .pill.ceiling b{color:var(--accent)}
+  #themeBtn{border:none; cursor:pointer; font-size:14px; padding:7px 12px}
+
+  /* ---------- Досье (левая панель) ---------- */
+  #dossierBtn{
+    position:fixed; left:14px; top:64px; z-index:12;
+    display:flex; align-items:center; gap:8px;
+    background:var(--surface); border:none; border-radius:99px;
+    box-shadow:var(--shadow); padding:10px 18px;
+    font-size:14px; font-weight:600; color:var(--ink); cursor:pointer;
+  }
+  #dossierBtn .badge{
+    background:var(--accent); color:#fff; border-radius:99px;
+    font-size:12px; padding:1px 8px; font-variant-numeric:tabular-nums;
+  }
+  #dossier{
+    position:fixed; left:0; top:0; bottom:0; width:min(360px,92vw); z-index:20;
+    background:var(--surface); box-shadow:var(--shadow);
+    transform:translateX(-105%); transition:transform .28s ease;
+    display:flex; flex-direction:column;
+  }
+  #dossier.open{transform:none}
+  #dossier .head{
+    display:flex; align-items:center; padding:16px 18px; border-bottom:1px solid var(--line);
+  }
+  #dossier .head h2{font-size:15px}
+  #dossier .head .sub{margin-left:auto; font-size:12.5px; color:var(--muted)}
+  #dossier .close{
+    border:none; background:none; font-size:20px; color:var(--muted);
+    cursor:pointer; margin-left:12px; line-height:1;
+  }
+  .hints{flex:1; overflow-y:auto}
+  .hint{padding:14px 18px; border-bottom:1px solid var(--line)}
+  .hint .top{display:flex; align-items:center; gap:8px}
+  .hint .icon{font-size:16px}
+  .hint .name{font-size:13px; font-weight:600}
+  .hint .cost{margin-left:auto; font-size:12px; color:var(--muted)}
+  .hint .body{margin-top:6px; font-size:14px; color:var(--muted)}
+  .hint.open .body{color:var(--ink)}
+  .hint button{
+    margin-top:8px; border:1px solid var(--line); background:var(--surface-2);
+    color:var(--accent); font-weight:600; font-size:13px;
+    border-radius:8px; padding:6px 12px; cursor:pointer;
+  }
+  .hint button:hover{background:var(--accent-soft); border-color:var(--accent)}
+  .hint-note{padding:13px 18px; font-size:12.5px; color:var(--muted); background:var(--surface-2)}
+
+  /* ---------- Мини-карта (нижний правый угол) ---------- */
+  #mapWidget{
+    position:fixed; right:14px; bottom:14px; z-index:15;
+    width:280px; transition:width .25s ease;
+  }
+  #mapWidget.open{width:min(560px,94vw)}
+  #mapCard{
+    background:var(--surface); border-radius:var(--radius);
+    box-shadow:var(--shadow); overflow:hidden;
+  }
+  #mapBox{position:relative; user-select:none}
+  #worldMap{display:block; width:100%; height:auto; background:var(--map-sea); cursor:crosshair; touch-action:none}
+  .land{fill:var(--map-land); stroke:var(--map-stroke); stroke-width:1; vector-effect:non-scaling-stroke}
+  .grat{stroke:var(--map-grat); stroke-width:1; vector-effect:non-scaling-stroke}
+  .cont-label{fill:var(--map-label); font-size:13px; letter-spacing:2px; text-anchor:middle; pointer-events:none}
+  .trace{stroke:var(--trace); stroke-width:1.5; stroke-dasharray:6 5; vector-effect:non-scaling-stroke}
+  .m-guess .marker-ring{stroke:var(--accent)} .m-guess .marker-dot{fill:var(--accent)}
+  .m-true .marker-ring{stroke:var(--good)} .m-true .marker-dot{fill:var(--good)}
+  #coordRead{
+    position:absolute; right:8px; top:8px; background:var(--pill);
+    border:1px solid var(--line); border-radius:7px; padding:2px 9px;
+    font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; pointer-events:none;
+  }
+  #mapFoot{display:flex; padding:10px; gap:10px; align-items:center}
+  .btn{
+    border:none; border-radius:10px; padding:10px 18px; font-size:14px; font-weight:600;
+    cursor:pointer; transition:background .15s;
+  }
+  .btn-primary{background:var(--accent); color:#fff; flex:1}
+  .btn-primary:hover{background:var(--accent-strong)}
+  .btn-primary:disabled{background:var(--btn-disabled); cursor:not-allowed}
+
+  /* ---------- Оверлеи ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(8,12,20,.65); z-index:40;
+    display:none; align-items:center; justify-content:center; padding:16px;
+  }
+  .overlay.show{display:flex}
+  .modal{
+    background:var(--surface); border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,.45);
+    width:100%; padding:22px 24px; animation:rise .25s ease-out;
+    max-height:94vh; overflow-y:auto;
+  }
+  #resultModal{max-width:820px}
+  #finalModal{max-width:560px}
+  @keyframes rise{from{transform:translateY(14px); opacity:0} to{transform:none; opacity:1}}
+  @media (prefers-reduced-motion:reduce){ .modal{animation:none} }
+  .kicker{font-size:12px; font-weight:600; letter-spacing:1.5px; color:var(--accent); text-transform:uppercase}
+  .modal h3{font-size:22px; margin:4px 0 0}
+  .modal .country{color:var(--muted); margin-bottom:12px}
+  #resultMapSlot{border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:14px}
+  #resultMapSlot #mapBox{border-radius:0}
+  .rgrid{display:flex; gap:10px; flex-wrap:wrap}
+  .rcell{
+    flex:1; min-width:130px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:12px; padding:10px 14px;
+  }
+  .rcell .lbl{font-size:12px; color:var(--muted)}
+  .rcell .val{font-size:18px; font-weight:700; font-variant-numeric:tabular-nums}
+  .rcell .val.pts{color:var(--accent)}
+  .verdict{margin:12px 0 0; font-size:14px}
+  .verdict.good{color:var(--good)} .verdict.mid{color:var(--amber)} .verdict.bad{color:var(--bad)}
+  .src{font-size:12px; color:var(--muted); margin-top:8px}
+  .src a{color:var(--muted)}
+  .modal .btn-primary{margin-top:16px; width:100%}
+
+  table.final{width:100%; border-collapse:collapse; margin:14px 0 4px; font-size:14px}
+  table.final td,table.final th{padding:8px 6px; border-bottom:1px solid var(--line); text-align:left}
+  table.final td:last-child,table.final th:last-child{text-align:right; font-variant-numeric:tabular-nums}
+  .total{font-size:28px; font-weight:700; color:var(--accent); text-align:center; margin:10px 0 2px}
+  .fverdict{text-align:center; color:var(--muted); font-size:14px}
+
+  @media (max-width:640px){
+    .hud-top{flex-wrap:wrap}
+    .pill{padding:5px 11px; font-size:12.5px}
+    #dossierBtn{top:auto; bottom:14px; left:14px}
+    #mapWidget{width:200px}
+    #mapWidget.open{width:calc(100vw - 28px)}
+    #toasts{top:96px}
+    #introCard{top:12%}
+  }
+</style>
+</head>
+<body>
+
+<div id="pano"></div>
+
+<div id="panoLoad">
+  <div class="spin"></div>
+  <div id="panoLoadText">Загружаю панораму…</div>
+</div>
+
+<div id="panoFallback">
+  <div class="note">Панорама не загрузилась — дело всё равно можно раскрыть по уликам:</div>
+  <div class="fb-anchors" id="fbAnchors"></div>
+  <div class="why" id="fbWhy"></div>
+  <label class="fb-anchor" style="margin-top:6px">
+    📁 Загрузить 360°-панораму файлом
+    <input type="file" id="localFile" accept="image/*" style="display:none">
+  </label>
+  <div class="why">Можно также просто перетащить файл панорамы в окно игры.</div>
+</div>
+
+<!-- HUD -->
+<div class="hud hud-top">
+  <div class="pill brand">Geo<span>Detective</span></div>
+  <div class="pill">Дело <b id="stRound">1/5</b></div>
+  <div class="right">
+    <div class="pill">Очки <b id="stScore">0</b></div>
+    <div class="pill ceiling">Потолок <b id="stCeiling">5000</b></div>
+    <button class="pill" id="themeBtn" title="Сменить тему">☀️</button>
+  </div>
+</div>
+
+<button id="dossierBtn">🗂 Досье <span class="badge" id="stHints">0/3</span></button>
+
+<aside id="dossier">
+  <div class="head">
+    <h2>Досье детектива</h2>
+    <div class="sub" id="hintCounter">улик 0 из 3</div>
+    <button class="close" id="dossierClose" aria-label="Закрыть">✕</button>
+  </div>
+  <div class="hints" id="hintList"></div>
+  <div class="hint-note">Улики появляются сами: вводная — сразу, остальные — пока вы гуляете по локации (или просто со временем). Вскрыть улику досрочно можно вручную, но это снизит потолок очков на 15%.</div>
+</aside>
+
+<!-- Вводная карточка дела -->
+<div id="introCard">
+  <div class="kicker" id="introKicker">Дело №1 · вводная</div>
+  <div class="ittl"><span id="introIcon">🔎</span> <span id="introTitle"></span></div>
+  <div class="itext"><span id="introText"></span><span class="caret" id="introCaret"></span></div>
+  <button class="btn btn-primary" id="introBtn">К расследованию 🔎</button>
+</div>
+
+<!-- Всплывающие улики -->
+<div id="toasts"></div>
+
+<!-- Мини-карта -->
+<div id="mapWidget">
+  <div id="mapCard">
+    <div id="mapBox">
+      <svg id="worldMap" viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" aria-label="Карта мира для ответа"></svg>
+      <div id="coordRead">—</div>
+    </div>
+    <div id="mapFoot">
+      <button class="btn btn-primary" id="confirmBtn" disabled>Поставьте маркер</button>
+    </div>
+  </div>
+</div>
+
+<!-- Результат раунда -->
+<div class="overlay" id="resultOverlay">
+  <div class="modal" id="resultModal">
+    <div class="kicker">Дело раскрыто</div>
+    <h3 id="resName"></h3>
+    <div class="country" id="resCountry"></div>
+    <div id="resultMapSlot"></div>
+    <div class="rgrid">
+      <div class="rcell"><div class="lbl">Промах</div><div class="val" id="resDist"></div></div>
+      <div class="rcell"><div class="lbl">Улики</div><div class="val" id="resHints"></div></div>
+      <div class="rcell"><div class="lbl">Очки за раунд</div><div class="val pts" id="resPts"></div></div>
+    </div>
+    <div class="verdict" id="resVerdict"></div>
+    <div class="src" id="resSrc"></div>
+    <button class="btn btn-primary" id="nextBtn">Следующее дело</button>
+  </div>
+</div>
+
+<!-- Итоги -->
+<div class="overlay" id="finalOverlay">
+  <div class="modal" id="finalModal">
+    <div class="kicker">Расследование завершено</div>
+    <h3>Итоги пяти дел</h3>
+    <table class="final">
+      <thead><tr><th>#</th><th>Место</th><th>Промах</th><th>Очки</th></tr></thead>
+      <tbody id="finalRows"></tbody>
+    </table>
+    <div class="total" id="finalTotal"></div>
+    <div class="fverdict" id="finalVerdict"></div>
+    <button class="btn btn-primary" id="restartBtn">Играть снова</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =====================================================
+   0. ТЕМА — тёмная по умолчанию
+   ===================================================== */
+const themeBtn = document.getElementById("themeBtn");
+function getTheme(){ try{ return localStorage.getItem("gd-theme") || "dark"; }catch(e){ return "dark"; } }
+function applyTheme(t){
+  document.body.classList.toggle("light", t === "light");
+  themeBtn.textContent = t === "light" ? "🌙" : "☀️";
+  try{ localStorage.setItem("gd-theme", t); }catch(e){}
+}
+applyTheme(getTheme());
+themeBtn.addEventListener("click", ()=>applyTheme(document.body.classList.contains("light") ? "dark" : "light"));
+
+/* =====================================================
+   1. ДАННЫЕ ЛОКАЦИЙ — реальные свободные панорамы
+      Wikimedia Commons (CC BY / CC BY-SA).
+      У каждой локации несколько точек-сцен, между
+      которыми можно перемещаться стрелками.
+   ===================================================== */
+const THUMB_W = 2560;
+const API_MULTI = files => "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*"
+  + "&prop=imageinfo&iiprop=url&iiurlwidth=" + THUMB_W
+  + "&titles=" + encodeURIComponent(files.map(f => "File:" + f).join("|"));
+const FILEPATH = f => "https://commons.wikimedia.org/wiki/Special:FilePath/" + encodeURIComponent(f) + "?width=" + THUMB_W;
+/* Прокси-CDN: тянет картинку с Викимедии со своей стороны и отдаёт
+   со своего домена с CORS — спасает и от региональных блокировок. */
+const PROXY = f => "https://wsrv.nl/?url=" + encodeURIComponent(FILEPATH(f)) + "&w=" + THUMB_W + "&output=jpg";
+const FILEPAGE = f => "https://commons.wikimedia.org/wiki/File:" + encodeURIComponent(f.replace(/ /g, "_"));
+
+const LOCATIONS = [
+  {
+    name: "Станция Джатибаранг", country: "Индонезия, Западная Ява",
+    lat: -6.4734, lng: 108.3067,
+    hints: [
+      { icon:"🏪", title:"Атмосферный след",  text:"Станция выкрашена в фирменные цвета государственной железнодорожной компании, а на перроне торгуют рисом, завёрнутым в банановый лист." },
+      { icon:"🌳", title:"Гео-сигнатура",     text:"Влажный тропический воздух, рисовые поля вокруг городка и вулканы на горизонте — классический пейзаж самого населённого острова планеты." },
+      { icon:"🏛️", title:"Триангуляция",      text:"Около трёх часов на поезде на восток от столицы страны — мегаполиса на 10+ миллионов на северо-западном берегу этого же острова." }
+    ],
+    scenes: [
+      { id:"station", file:"-arya- Jatibarang train station 360 2018.jpg", yaw:-20,
+        links:[ {to:"school", yaw:95, pitch:-6, label:"🚂 Уехать местным поездом"} ] },
+      { id:"school", file:"-arya-MAN 2 Kota Cirebon panorama 360-2019.jpg", yaw:0,
+        links:[ {to:"station", yaw:-140, pitch:-6, label:"🚂 Вернуться на станцию"} ] }
+    ]
+  },
+  {
+    name: "Краста-Мора, Энгадин", country: "Швейцария, Граубюнден",
+    lat: 46.5714, lng: 9.8678,
+    hints: [
+      { icon:"🎿", title:"Атмосферный след",  text:"В сугроб воткнуты лыжи с камусами: подъёмников здесь нет, наверх поднимаются пешком, а вниз уходят по нетронутой целине." },
+      { icon:"🏔️", title:"Гео-сигнатура",     text:"Трёхтысячники, сухой морозный воздух и цепочка деревень в широкой солнечной долине молодой реки Инн." },
+      { icon:"🚂", title:"Триангуляция",      text:"По долине внизу ходит знаменитый красный поезд из списка ЮНЕСКО; полчаса на нём — и вы на самом шикарном горнолыжном курорте страны банков и шоколада." }
+    ],
+    scenes: [
+      { id:"sedlo", file:"Crasta Mora Spherical Panorama 2.jpg", yaw:0,
+        links:[ {to:"greben", yaw:-150, pitch:-8, label:"🥾 Подняться на гребень"} ] },
+      { id:"greben", file:"Crasta Mora Spherical Panorama 1.jpg", yaw:30,
+        links:[ {to:"sedlo", yaw:60, pitch:-14, label:"⛷ Спуститься к лыжам"},
+                {to:"vershina", yaw:-110, pitch:-4, label:"🧗 На скальный выступ"} ] },
+      { id:"vershina", file:"Crasta Mora Spherical Panorama 4.jpg", yaw:-40,
+        links:[ {to:"greben", yaw:120, pitch:-10, label:"🥾 Назад на гребень"} ] }
+    ]
+  },
+  {
+    name: "Окрестности Кромлау", country: "Германия, Саксония",
+    lat: 51.5296, lng: 14.6270,
+    hints: [
+      { icon:"🏛️", title:"Атмосферный след",  text:"В парке за лесом стоит каменный «чёртов мост», который вместе со своим отражением в воде образует идеальный круг — мечта фотографов." },
+      { icon:"🌳", title:"Гео-сигнатура",     text:"Плоские сосновые леса, бирюзовые озёра-карьеры и рододендроновые парки исторической области Лужица на самом востоке страны." },
+      { icon:"🏪", title:"Триангуляция",      text:"Меньше получаса до пограничной реки Нейсе — за ней уже Польша. Долетите до реки — увидите сами." }
+    ],
+    scenes: [
+      { id:"see", file:"Gablenz Kromlau Aerial Pan360.jpg", yaw:20,
+        links:[ {to:"dorf", yaw:150, pitch:-12, label:"🚁 К деревне за лесом"} ] },
+      { id:"dorf", file:"Gablenz Aerial Pan360.jpg", yaw:0,
+        links:[ {to:"see", yaw:-45, pitch:-14, label:"🚁 Назад к бирюзовому озеру"},
+                {to:"fluss", yaw:75, pitch:-8, label:"🚁 На восток, к реке"} ] },
+      { id:"fluss", file:"Neiße-Malxetal Pusack Aerial Pan360.jpg", yaw:-60,
+        links:[ {to:"dorf", yaw:-130, pitch:-12, label:"🚁 Обратно к деревне"} ] }
+    ]
+  },
+  {
+    name: "Центр Стивена Удвар-Хази", country: "США, Вирджиния",
+    lat: 38.9111, lng: -77.4435,
+    hints: [
+      { icon:"✈️", title:"Атмосферный след",  text:"Под сводом гигантского ангара — чёрный титановый разведчик, летавший втрое быстрее звука, а в соседнем зале отдыхает космический челнок «Дискавери»." },
+      { icon:"🏛️", title:"Гео-сигнатура",     text:"Это филиал национального авиакосмического музея; вход, как во все музеи этого знаменитого института, бесплатный — по завещанию английского учёного." },
+      { icon:"🛫", title:"Триангуляция",      text:"Ангар стоит на краю международного аэропорта имени госсекретаря, в сорока километрах к западу от столицы страны." }
+    ],
+    scenes: [
+      { id:"hangar", file:"Udvar-Hazy Center spherical panorama 01 03-04-2018.jpg", yaw:-10,
+        links:[ {to:"expo", yaw:100, pitch:-4, label:"🚶 Пройти вдоль экспозиции"},
+                {to:"balkon", yaw:-160, pitch:2, label:"🚶 Подняться в галерею"} ] },
+      { id:"expo", file:"Udvar-Hazy Center spherical panorama 03 03-04-2018.jpg", yaw:40,
+        links:[ {to:"hangar", yaw:-80, pitch:-4, label:"🚶 Назад к «Блэкбёрду»"} ] },
+      { id:"balkon", file:"Udvar-Hazy Center spherical panorama 05 03-04-2018.jpg", yaw:120,
+        links:[ {to:"hangar", yaw:120, pitch:-8, label:"🚶 Спуститься в ангар"} ] }
+    ]
+  },
+  {
+    name: "Проспект Непокорённых", country: "Россия, Санкт-Петербург",
+    lat: 59.997, lng: 30.394,
+    hints: [
+      { icon:"🏭", title:"Атмосферный след",  text:"Дрон висит над старым заводом «Красный Октябрь», выпускающим двигатели для самолётов и вертолётов; вокруг — панельные кварталы и широкие проспекты." },
+      { icon:"🌆", title:"Гео-сигнатура",     text:"Плоский приморский мегаполис на 60-й параллели: летом здесь белые ночи, а зимой солнце едва поднимается над крышами." },
+      { icon:"🏛️", title:"Триангуляция",      text:"Проспект под дроном назван в честь горожан, переживших 900-дневную блокаду; в паре кварталов — мемориальное кладбище её жертв." }
+    ],
+    scenes: [
+      { id:"zavod", file:"Krasniy Oktyabr plant spherical panorama 1.jpg", yaw:0,
+        links:[ {to:"kvartal", yaw:70, pitch:-10, label:"🚁 Перелететь через цеха"} ] },
+      { id:"kvartal", file:"Krasniy Oktyabr plant spherical panorama 2.jpg", yaw:-30,
+        links:[ {to:"zavod", yaw:-120, pitch:-10, label:"🚁 Вернуться к депо"} ] }
+    ]
+  }
+];
+
+/* =====================================================
+   2. КАРТА МИРА (упрощённые контуры, equirectangular)
+   ===================================================== */
+const W = 1000, H = 500;
+const px = lng => (lng + 180) / 360 * W;
+const py = lat => (90 - lat) / 180 * H;
+
+const SHAPES = [
+  [[71,-156],[70,-140],[69,-120],[68,-105],[66,-85],[63,-78],[60,-70],[55,-58],[52,-56],[47,-65],[44,-66],[41,-70],[39,-74],[35,-76],[31,-81],[26,-80],[28,-83],[30,-86],[29,-90],[28,-96],[24,-97],[19,-96],[16,-93],[14,-92],[10,-86],[8,-80],[9,-78],[10,-84],[15,-95],[19,-104],[23,-110],[28,-114],[32,-117],[34,-120],[40,-124],[46,-124],[50,-127],[55,-132],[58,-137],[60,-146],[58,-152],[55,-160],[58,-162],[63,-166],[66,-164]],
+  [[60,-45],[64,-52],[70,-55],[76,-68],[80,-60],[82,-40],[78,-20],[70,-22],[65,-38]],
+  [[11,-72],[9,-62],[5,-52],[-1,-44],[-5,-35],[-13,-38],[-23,-41],[-34,-53],[-39,-62],[-47,-66],[-54,-68],[-52,-72],[-38,-73],[-18,-70],[-5,-81],[1,-80],[8,-77]],
+  [[35,-6],[37,10],[33,22],[31,32],[22,37],[15,40],[12,43],[11,51],[2,45],[-4,41],[-10,40],[-16,40],[-20,35],[-26,33],[-30,31],[-34,20],[-33,18],[-29,17],[-23,15],[-17,12],[-9,13],[-1,9],[4,7],[4,-2],[5,-8],[9,-14],[15,-17],[21,-17],[26,-15],[31,-10]],
+  [[-12,49],[-16,50],[-25,47],[-25,44],[-19,44],[-13,48]],
+  [[36,-9],[37,-2],[40,0],[43,4],[44,9],[42,13],[40,18],[42,21],[40,23],[38,23],[40,26],[41,29],[38,27],[36,30],[36,35],[31,34],[30,32],[20,39],[13,44],[15,52],[21,59],[26,60],[25,62],[24,67],[22,70],[17,73],[8,77],[13,80],[18,84],[22,89],[20,92],[15,95],[10,98],[6,100],[1,104],[8,100],[13,100],[12,103],[10,106],[14,109],[19,106],[21,108],[22,113],[25,119],[30,122],[35,120],[38,118],[40,121],[39,124],[35,127],[37,130],[41,130],[46,137],[52,141],[58,145],[61,152],[60,160],[62,166],[64,178],[67,179],[69,170],[71,160],[73,141],[76,113],[74,86],[70,74],[68,68],[67,45],[64,38],[67,32],[69,33],[66,30],[60,28],[59,24],[54,20],[54,13],[53,9],[56,8],[53,6],[51,3],[49,-2],[48,-5],[46,-2],[43,-2],[43,-9]],
+  [[58,7],[62,5],[66,12],[69,16],[71,25],[70,28],[68,24],[65,22],[62,18],[60,18],[58,12],[56,13]],
+  [[50,-5],[53,-4],[56,-6],[58,-5],[58,-3],[54,0],[51,1]],
+  [[52,-10],[55,-8],[54,-6],[51,-9]],
+  [[64,-22],[66,-18],[65,-14],[63,-18]],
+  [[31,130],[34,134],[36,138],[40,140],[43,141],[45,143],[43,145],[40,142],[36,141],[33,136],[31,132]],
+  [[7,117],[1,119],[-3,116],[-1,110],[4,113]],
+  [[5,95],[-3,102],[-6,106],[-4,102],[3,97]],
+  [[-6,105],[-7,110],[-8,114],[-8,111],[-6,106]],
+  [[-1,131],[-3,138],[-6,144],[-9,147],[-8,143],[-5,138],[-2,132]],
+  [[18,121],[14,122],[10,124],[7,126],[9,123],[14,120]],
+  [[23,-82],[21,-77],[20,-74],[22,-79]],
+  [[-11,142],[-16,146],[-20,149],[-25,153],[-32,153],[-37,150],[-39,146],[-36,140],[-35,137],[-32,134],[-33,124],[-34,115],[-31,115],[-26,113],[-20,114],[-17,122],[-14,127],[-12,131],[-14,136],[-17,140]],
+  [[-35,173],[-38,176],[-41,175],[-39,174],[-36,174]],
+  [[-41,172],[-44,168],[-46,167],[-44,171],[-42,174]],
+  [[-70,-180],[-68,-60],[-72,0],[-68,60],[-70,120],[-72,180],[-90,180],[-90,-180]]
+];
+const LABELS = [
+  ["СЕВЕРНАЯ АМЕРИКА",55,-102],["ЮЖНАЯ АМЕРИКА",-15,-60],["АФРИКА",8,20],
+  ["ЕВРАЗИЯ",55,85],["АВСТРАЛИЯ",-25,134],["АНТАРКТИДА",-80,20]
+];
+
+const svg = document.getElementById("worldMap");
+const SVGNS = "http://www.w3.org/2000/svg";
+let markerLayer;
+
+function el(tag, attrs, parent){
+  const n = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  (parent || svg).appendChild(n);
+  return n;
+}
+function buildMap(){
+  for (let lng=-150; lng<=150; lng+=30) el("line",{x1:px(lng),y1:0,x2:px(lng),y2:H,class:"grat"});
+  for (let lat=-60; lat<=60; lat+=30) el("line",{x1:0,y1:py(lat),x2:W,y2:py(lat),class:"grat"});
+  for (const shape of SHAPES){
+    const d = shape.map((p,i)=>(i?"L":"M")+px(p[1]).toFixed(1)+" "+py(p[0]).toFixed(1)).join("")+"Z";
+    el("path",{d,class:"land"});
+  }
+  for (const [t,lat,lng] of LABELS){
+    const n = el("text",{x:px(lng),y:py(lat),class:"cont-label"}); n.textContent = t;
+  }
+  markerLayer = el("g",{});
+}
+
+/* --- Вид карты: зум и сдвиг --- */
+let view = {x:0, y:0, w:W, h:H};
+function applyView(){
+  svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  const s = view.w / W;
+  svg.querySelectorAll(".marker-dot").forEach(c=>c.setAttribute("r", 6*s));
+  svg.querySelectorAll(".marker-ring").forEach(c=>c.setAttribute("r", 10*s));
+  svg.querySelectorAll(".cont-label").forEach(t=>t.setAttribute("font-size", Math.min(13, 13*s*1.4)));
+}
+function clientToMap(e){
+  const r = svg.getBoundingClientRect();
+  return {
+    x: view.x + (e.clientX - r.left) / r.width  * view.w,
+    y: view.y + (e.clientY - r.top)  / r.height * view.h
+  };
+}
+svg.addEventListener("wheel", e=>{
+  e.preventDefault();
+  const m = clientToMap(e);
+  const f = e.deltaY > 0 ? 1.25 : 0.8;
+  const w = Math.min(W, Math.max(50, view.w * f));
+  const h = w / 2;
+  view.x = Math.min(Math.max(m.x - (m.x - view.x) * (w / view.w), 0), W - w);
+  view.y = Math.min(Math.max(m.y - (m.y - view.y) * (w / view.w), 0), H - h);
+  view.w = w; view.h = h;
+  applyView();
+},{passive:false});
+
+let drag = null;
+svg.addEventListener("pointerdown", e=>{
+  drag = {sx:e.clientX, sy:e.clientY, vx:view.x, vy:view.y, moved:false};
+  svg.setPointerCapture(e.pointerId);
+});
+svg.addEventListener("pointermove", e=>{
+  const m = clientToMap(e);
+  const lat = 90 - m.y/H*180, lng = m.x/W*360 - 180;
+  document.getElementById("coordRead").textContent = lat.toFixed(1)+"°, "+lng.toFixed(1)+"°";
+  if (!drag) return;
+  const r = svg.getBoundingClientRect();
+  const dx = (e.clientX - drag.sx) / r.width  * view.w;
+  const dy = (e.clientY - drag.sy) / r.height * view.h;
+  if (Math.abs(e.clientX-drag.sx) + Math.abs(e.clientY-drag.sy) > 6) drag.moved = true;
+  view.x = Math.min(Math.max(drag.vx - dx, 0), W - view.w);
+  view.y = Math.min(Math.max(drag.vy - dy, 0), H - view.h);
+  applyView();
+});
+svg.addEventListener("pointerup", e=>{
+  const wasDrag = drag && drag.moved;
+  drag = null;
+  if (wasDrag || state.answered) return;
+  const m = clientToMap(e);
+  if (m.x<0||m.x>W||m.y<0||m.y>H) return;
+  state.guess = { lat: 90 - m.y/H*180, lng: m.x/W*360 - 180 };
+  drawMarkers();
+  const btn = document.getElementById("confirmBtn");
+  btn.disabled = false;
+  btn.textContent = "Подтвердить: " + state.guess.lat.toFixed(1) + "°, " + state.guess.lng.toFixed(1) + "°";
+});
+
+function marker(lat,lng,cls){
+  const g = el("g",{class:cls}, markerLayer);
+  const s = view.w / W;
+  el("circle",{cx:px(lng),cy:py(lat),r:10*s,fill:"none","stroke-width":2,class:"marker-ring","vector-effect":"non-scaling-stroke"},g);
+  el("circle",{cx:px(lng),cy:py(lat),r:6*s,class:"marker-dot"},g);
+}
+function drawMarkers(){
+  markerLayer.innerHTML = "";
+  if (state.guess) marker(state.guess.lat, state.guess.lng, "m-guess");
+  if (state.answered){
+    const t = LOCATIONS[state.round];
+    el("line",{x1:px(state.guess.lng),y1:py(state.guess.lat),x2:px(t.lng),y2:py(t.lat),class:"trace"}, markerLayer);
+    marker(t.lat, t.lng, "m-true");
+  }
+}
+/* Автоподгонка вида под догадку + правду (для экрана результата) */
+function fitView(a, b){
+  const xs = [px(a.lng), px(b.lng)], ys = [py(a.lat), py(b.lat)];
+  let x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const padX = Math.max((x1-x0)*0.35, 60), padY = Math.max((y1-y0)*0.35, 30);
+  x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
+  let w = x1-x0, h = y1-y0;
+  if (w/h > 2) h = w/2; else w = h*2;
+  w = Math.min(W, w); h = w/2;
+  const cx = (x0+x1)/2, cy = (y0+y1)/2;
+  view.w = w; view.h = h;
+  view.x = Math.min(Math.max(cx - w/2, 0), W - w);
+  view.y = Math.min(Math.max(cy - h/2, 0), H - h);
+  applyView();
+}
+
+/* =====================================================
+   3. ИГРОВАЯ ЛОГИКА
+   ===================================================== */
+const HINT_PENALTY = 0.15, MAX_PTS = 5000;
+const state = {
+  round:0, total:0, results:[], guess:null, answered:false,
+  revealed:[false,false,false], paid:0, viewer:null,
+  visited:new Set(), introShown:false, timers:[]
+};
+const revealedCount = () => state.revealed.filter(Boolean).length;
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function haversine(a, b){
+  const R = 6371, toR = Math.PI/180;
+  const dLat = (b.lat-a.lat)*toR, dLng = (b.lng-a.lng)*toR;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*toR)*Math.cos(b.lat*toR)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+const ceiling = () => Math.round(MAX_PTS * (1 - HINT_PENALTY*state.paid));
+
+function updateStats(){
+  document.getElementById("stRound").textContent = (state.round+1)+"/"+LOCATIONS.length;
+  document.getElementById("stScore").textContent = state.total.toLocaleString("ru-RU");
+  document.getElementById("stHints").textContent = revealedCount()+"/3";
+  document.getElementById("stCeiling").textContent = ceiling().toLocaleString("ru-RU");
+  document.getElementById("hintCounter").textContent = "улик "+revealedCount()+" из 3";
+}
+
+/* --- Досье --- */
+const dossier = document.getElementById("dossier");
+document.getElementById("dossierBtn").addEventListener("click", ()=>dossier.classList.add("open"));
+document.getElementById("dossierClose").addEventListener("click", ()=>dossier.classList.remove("open"));
+document.addEventListener("keydown", e=>{ if (e.key === "Escape"){ dossier.classList.remove("open"); hideIntro(); } });
+
+function renderHints(){
+  const loc = LOCATIONS[state.round];
+  const list = document.getElementById("hintList");
+  list.innerHTML = "";
+  loc.hints.forEach((h,i)=>{
+    const d = document.createElement("div");
+    d.className = "hint"; d.id = "hint-"+i;
+    const lockedText = i === 0
+      ? "Вводная по делу появится с минуты на минуту…"
+      : "Появится сама, пока вы осматриваетесь и гуляете по локации.";
+    d.innerHTML = `<div class="top"><span class="icon">${h.icon}</span>
+      <span class="name">${h.title}</span><span class="cost">${i===0 ? "вводная" : "улика"}</span></div>
+      <div class="body">${lockedText}</div>`;
+    if (i > 0){
+      const b = document.createElement("button");
+      b.textContent = "Вскрыть сейчас (−15%)";
+      b.addEventListener("click", ()=>revealHint(i, true));
+      d.appendChild(b);
+    }
+    list.appendChild(d);
+  });
+}
+
+/* --- Вводная карточка: печатающийся текст --- */
+const introCard = document.getElementById("introCard");
+let typerTimer = null, introHideTimer = null;
+function showIntro(h){
+  document.getElementById("introKicker").textContent = "Дело №"+(state.round+1)+" · вводная";
+  document.getElementById("introIcon").textContent = h.icon;
+  document.getElementById("introTitle").textContent = h.title;
+  const target = document.getElementById("introText");
+  const caret = document.getElementById("introCaret");
+  target.textContent = ""; caret.style.display = "inline-block";
+  introCard.classList.add("show");
+  if (reducedMotion){
+    target.textContent = h.text; caret.style.display = "none";
+    introHideTimer = setTimeout(hideIntro, 9000);
+    return;
+  }
+  let i = 0;
+  typerTimer = setInterval(()=>{
+    i += 1;
+    target.textContent = h.text.slice(0, i);
+    if (i >= h.text.length){
+      clearInterval(typerTimer); typerTimer = null;
+      setTimeout(()=>{ caret.style.display = "none"; }, 1200);
+      introHideTimer = setTimeout(hideIntro, 8000);
+    }
+  }, 24);
+}
+function hideIntro(){
+  if (typerTimer){ // дописать мгновенно, текст останется в досье
+    clearInterval(typerTimer); typerTimer = null;
+  }
+  if (introHideTimer){ clearTimeout(introHideTimer); introHideTimer = null; }
+  introCard.classList.remove("show");
+}
+document.getElementById("introBtn").addEventListener("click", hideIntro);
+
+/* --- Всплывающие улики --- */
+function showToast(h){
+  const box = document.getElementById("toasts");
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = `<div class="ticon">${h.icon}</div>
+    <div class="tbody"><div class="ttl">Новая улика · ${h.title}</div><div class="txt">${h.text}</div></div>
+    <button class="tx" aria-label="Закрыть">✕</button>`;
+  const kill = ()=>{
+    t.classList.remove("in"); t.classList.add("out");
+    setTimeout(()=>t.remove(), 500);
+  };
+  t.querySelector(".tx").addEventListener("click", kill);
+  box.appendChild(t);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>t.classList.add("in")));
+  setTimeout(kill, 15000);
+}
+
+/* --- Вскрытие улик ---
+   Улики появляются сами (бесплатно): вводная — после загрузки,
+   остальные — при переходе на новую точку или по таймеру.
+   Досрочное ручное вскрытие из досье стоит 15% потолка. --- */
+function revealHint(i, paid){
+  if (state.revealed[i] || state.answered) return;
+  state.revealed[i] = true;
+  if (paid) state.paid++;
+  const h = LOCATIONS[state.round].hints[i];
+  const d = document.getElementById("hint-"+i);
+  if (d){
+    d.classList.add("open");
+    d.querySelector(".body").textContent = h.text;
+    const btn = d.querySelector("button"); if (btn) btn.remove();
+    d.querySelector(".cost").textContent = paid ? "−15%" : "вскрыто";
+  }
+  const fb = document.getElementById("fb-anchor-"+i); if (fb) fb.classList.add("done");
+  if (!paid){
+    if (i === 0) showIntro(h); else showToast(h);
+  }
+  updateStats();
+}
+function autoReveal(){
+  for (let i = 1; i < 3; i++){
+    if (!state.revealed[i]){ revealHint(i, false); return; }
+  }
+}
+function beginHintFlow(){
+  if (state.introShown) return;
+  state.introShown = true;
+  const myRound = state.round;
+  const t = (fn, ms)=>state.timers.push(setTimeout(()=>{ if (state.round === myRound) fn(); }, ms));
+  t(()=>revealHint(0, false), 1100);
+  t(autoReveal, 40000);
+  t(autoReveal, 85000);
+}
+function clearTimers(){
+  state.timers.forEach(clearTimeout);
+  state.timers = [];
+}
+
+/* --- Панорамы: пакетный API -> прямой URL -> прокси-CDN -> заглушка --- */
+function probeImage(url, ms){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    const t = setTimeout(()=>{ img.src=""; reject(new Error("таймаут")); }, ms || 45000);
+    img.onload = ()=>{ clearTimeout(t); resolve(url); };
+    img.onerror = ()=>{ clearTimeout(t); reject(new Error("не загрузилось")); };
+    img.src = url;
+  });
+}
+const normTitle = s => s.replace(/^File:/,"").replace(/_/g," ").toLowerCase();
+async function apiUrls(files){
+  const r = await fetch(API_MULTI(files), {signal: AbortSignal.timeout(10000)});
+  if (!r.ok) throw new Error("API HTTP " + r.status);
+  const j = await r.json();
+  const map = {};
+  const pages = j && j.query && j.query.pages;
+  if (pages) for (const id in pages){
+    const p = pages[id];
+    const ii = p.imageinfo && p.imageinfo[0];
+    if (ii) map[normTitle(p.title)] = ii.thumburl || ii.url;
+  }
+  const urls = files.map(f => map[normTitle(f)]);
+  if (urls.some(u => !u)) throw new Error("не все файлы найдены");
+  return urls;
+}
+/* Диагностика: где именно рвётся сеть */
+async function diagnose(){
+  const test = url => probeImage(url, 7000).then(()=>true, ()=>false);
+  const control = await test("https://cdn.jsdelivr.net/gh/mpetroff/pannellum@2.5.6/utils/multires/fallback/f.png")
+    .catch(()=>false);
+  const wiki = await test("https://commons.wikimedia.org/wiki/Special:FilePath/Gablenz%20Kromlau%20Aerial%20Pan360.jpg?width=64");
+  if (!control && !wiki) return "похоже, нет доступа в интернет вообще.";
+  if (control && !wiki) return "интернет есть, но Wikimedia из вашей сети недоступна (блокировка провайдера?). Прокси тоже не помог — попробуйте VPN или загрузите файл панорамы вручную.";
+  return "сеть в порядке, но панорама не загрузилась — возможно, файл переименован на Commons.";
+}
+function moveMarker(div, label){
+  div.innerHTML = `<div class="arr">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 14l7-7 7 7"/><path d="M5 21l7-7 7 7"/>
+      </svg></div>
+    <div class="lbl">${label}</div>`;
+}
+function initViewer(urls, loc){
+  const loadEl = document.getElementById("panoLoad");
+  const scenes = {};
+  loc.scenes.forEach((s, i)=>{
+    scenes[s.id] = {
+      type: "equirectangular",
+      panorama: urls[i],
+      yaw: s.yaw || 0,
+      hotSpots: (s.links || []).map(l=>({
+        pitch: l.pitch, yaw: l.yaw,
+        type: "scene", sceneId: l.to,
+        cssClass: "gd-move",
+        createTooltipFunc: moveMarker,
+        createTooltipArgs: l.label
+      }))
+    };
+    if (i === 0) scenes[s.id].autoRotate = -2;
+  });
+  state.viewer = pannellum.viewer("pano", {
+    default: {
+      firstScene: loc.scenes[0].id,
+      sceneFadeDuration: 900,
+      autoLoad: true,
+      compass: false,
+      showZoomCtrl: false,
+      showFullscreenCtrl: false,
+      crossOrigin: "anonymous",
+      hfov: 95
+    },
+    scenes
+  });
+  state.viewer.on("load", ()=>{
+    document.getElementById("panoFallback").style.display = "none";
+    document.getElementById("pano").style.display = "block";
+    loadEl.style.opacity = 0;
+    setTimeout(()=>loadEl.style.display = "none", 400);
+    if (!state.introShown){
+      beginHintFlow();
+      // тихо подгружаем остальные точки, чтобы переходы были мгновенными
+      urls.slice(1).forEach(u=>{ const im = new Image(); im.crossOrigin = "anonymous"; im.src = u; });
+    }
+  });
+  state.viewer.on("scenechange", id=>{
+    if (!state.visited.has(id)){
+      state.visited.add(id);
+      autoReveal();
+    }
+  });
+}
+async function loadPanorama(){
+  const loc = LOCATIONS[state.round];
+  const files = loc.scenes.map(s=>s.file);
+  const loadEl = document.getElementById("panoLoad");
+  const loadText = document.getElementById("panoLoadText");
+  loadEl.style.display = "flex"; loadEl.style.opacity = 1;
+  document.getElementById("panoFallback").style.display = "none";
+  document.getElementById("pano").style.display = "block";
+  if (state.viewer){ try{ state.viewer.destroy(); }catch(e){} state.viewer = null; }
+
+  const myRound = state.round;
+  const stale = () => state.round !== myRound; // игрок мог уйти дальше по заглушке
+
+  // Этап 1: официальный API Commons — все точки одним запросом
+  let urls = null;
+  try {
+    loadText.textContent = "Ищу панорамы в архиве…";
+    urls = await apiUrls(files);
+  } catch(e1){ urls = null; }
+  if (stale()) return;
+  if (!urls) urls = files.map(FILEPATH); // Этап 2: прямой путь Special:FilePath
+
+  try {
+    loadText.textContent = "Загружаю первую точку… (несколько МБ)";
+    await probeImage(urls[0], 45000);
+  } catch(e2){
+    // Этап 3: прокси-CDN (обходит блокировки и чинит CORS)
+    if (stale()) return;
+    try {
+      loadText.textContent = "Пробую через прокси-CDN… (первый раз может думать до минуты)";
+      urls = files.map(PROXY);
+      await probeImage(urls[0], 90000);
+    } catch(e3){
+      if (stale()) return;
+      loadText.textContent = "Выясняю, что с сетью…";
+      const verdict = await diagnose();
+      return showFallback(verdict);
+    }
+  }
+  if (stale()) return;
+  initViewer(urls, loc);
+}
+function showFallback(why){
+  const loc = LOCATIONS[state.round];
+  document.getElementById("panoLoad").style.display = "none";
+  document.getElementById("pano").style.display = "none";
+  const fbEl = document.getElementById("panoFallback");
+  fbEl.style.display = "flex";
+  document.getElementById("fbWhy").textContent = "Диагностика: " + why;
+  const box = document.getElementById("fbAnchors");
+  box.innerHTML = "";
+  loc.hints.forEach((h,i)=>{
+    const b = document.createElement("button");
+    b.className = "fb-anchor"; b.id = "fb-anchor-"+i;
+    b.textContent = h.icon+" "+h.title;
+    b.addEventListener("click", ()=>revealHint(i, false));
+    box.appendChild(b);
+  });
+  beginHintFlow(); // улики появляются по таймеру и без панорамы
+}
+/* Своя панорама: файл с диска (drag&drop или кнопка) — без сети и CORS */
+function useLocalFile(file){
+  if (!file || !file.type.startsWith("image/")) return;
+  const url = URL.createObjectURL(file);
+  if (state.viewer){ try{ state.viewer.destroy(); }catch(e){} state.viewer = null; }
+  document.getElementById("panoLoad").style.display = "none";
+  const loc = LOCATIONS[state.round];
+  initViewer([url], { scenes: [ { id:"local", yaw:0, links:[] } ], hints: loc.hints });
+}
+document.getElementById("localFile").addEventListener("change", e=>useLocalFile(e.target.files[0]));
+window.addEventListener("dragover", e=>e.preventDefault());
+window.addEventListener("drop", e=>{
+  e.preventDefault();
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) useLocalFile(e.dataTransfer.files[0]);
+});
+
+/* --- Мини-карта: раскрытие --- */
+const mapWidget = document.getElementById("mapWidget");
+mapWidget.addEventListener("pointerenter", ()=>mapWidget.classList.add("open"));
+mapWidget.addEventListener("pointerleave", ()=>{ if (!drag) mapWidget.classList.remove("open"); });
+mapWidget.addEventListener("pointerdown", ()=>mapWidget.classList.add("open"));
+
+/* --- Перенос карты между виджетом и экраном результата --- */
+const mapBox = document.getElementById("mapBox");
+function mapToResult(){ document.getElementById("resultMapSlot").appendChild(mapBox); }
+function mapToWidget(){ document.getElementById("mapCard").insertBefore(mapBox, document.getElementById("mapFoot")); }
+
+/* --- Раунды --- */
+function startRound(){
+  clearTimers();
+  hideIntro();
+  document.getElementById("toasts").innerHTML = "";
+  state.guess = null; state.answered = false;
+  state.revealed = [false,false,false]; state.paid = 0;
+  state.visited = new Set([LOCATIONS[state.round].scenes[0].id]);
+  state.introShown = false;
+  const btn = document.getElementById("confirmBtn");
+  btn.disabled = true; btn.textContent = "Поставьте маркер";
+  dossier.classList.remove("open");
+  mapWidget.classList.remove("open");
+  view = {x:0,y:0,w:W,h:H}; applyView();
+  drawMarkers(); renderHints(); updateStats(); loadPanorama();
+}
+
+document.getElementById("confirmBtn").addEventListener("click", ()=>{
+  if (!state.guess || state.answered) return;
+  state.answered = true;
+  clearTimers();
+  hideIntro();
+  const loc = LOCATIONS[state.round];
+  const d = haversine(state.guess, loc);
+  const pts = Math.round(MAX_PTS * Math.exp(-d/2000) * (1 - HINT_PENALTY*state.paid));
+  state.total += pts;
+  state.results.push({name:loc.name, country:loc.country, dist:d, pts});
+  updateStats();
+
+  document.getElementById("resName").textContent = loc.name;
+  document.getElementById("resCountry").textContent = loc.country;
+  document.getElementById("resDist").textContent = d < 1 ? "< 1 км!" : Math.round(d).toLocaleString("ru-RU")+" км";
+  document.getElementById("resHints").textContent = revealedCount()+" из 3" + (state.paid ? " · −"+(state.paid*15)+"%" : "");
+  document.getElementById("resPts").textContent = pts.toLocaleString("ru-RU");
+  const v = document.getElementById("resVerdict");
+  if (d < 150){ v.textContent = "Снайперски. Настоящий детектив."; v.className = "verdict good"; }
+  else if (d < 800){ v.textContent = "Очень близко — регион вычислен верно."; v.className = "verdict good"; }
+  else if (d < 3000){ v.textContent = "Правильное направление, но точность хромает."; v.className = "verdict mid"; }
+  else { v.textContent = "Промах на другой конец света. Бывает."; v.className = "verdict bad"; }
+  document.getElementById("resSrc").innerHTML = "Панорамы: " +
+    loc.scenes.map((s,i)=>'<a href="'+FILEPAGE(s.file)+'" target="_blank" rel="noopener">точка '+(i+1)+"</a>").join(" · ") +
+    " — Wikimedia Commons (свободные лицензии)";
+  document.getElementById("nextBtn").textContent =
+    state.round === LOCATIONS.length-1 ? "К итогам расследования" : "Следующее дело";
+
+  mapToResult();
+  document.getElementById("resultOverlay").classList.add("show");
+  drawMarkers();
+  fitView(state.guess, loc);
+});
+
+document.getElementById("nextBtn").addEventListener("click", ()=>{
+  document.getElementById("resultOverlay").classList.remove("show");
+  mapToWidget();
+  if (state.round === LOCATIONS.length-1){ showFinal(); return; }
+  state.round++;
+  startRound();
+});
+
+function showFinal(){
+  const rows = document.getElementById("finalRows");
+  rows.innerHTML = "";
+  state.results.forEach((r,i)=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${i+1}</td><td>${r.name}, ${r.country}</td>
+      <td>${Math.round(r.dist).toLocaleString("ru-RU")} км</td><td>${r.pts.toLocaleString("ru-RU")}</td>`;
+    rows.appendChild(tr);
+  });
+  document.getElementById("finalTotal").textContent =
+    state.total.toLocaleString("ru-RU") + " / " + (MAX_PTS*LOCATIONS.length).toLocaleString("ru-RU");
+  const fv = document.getElementById("finalVerdict");
+  const share = state.total / (MAX_PTS*LOCATIONS.length);
+  fv.textContent = share > 0.7 ? "Уровень: главный детектив планеты." :
+                   share > 0.4 ? "Уверенный следователь. Ещё пара дел — и высшая лига." :
+                                 "Стажёр географического отдела. Мир большой — тренируйтесь!";
+  document.getElementById("finalOverlay").classList.add("show");
+}
+
+document.getElementById("restartBtn").addEventListener("click", ()=>{
+  document.getElementById("finalOverlay").classList.remove("show");
+  state.round = 0; state.total = 0; state.results = [];
+  startRound();
+});
+
+/* --- Старт --- */
+buildMap();
+applyView();
+startRound();
+</script>
+</body>
+</html>
